@@ -1,0 +1,181 @@
+---
+title: "Bobb_npp_analysis"
+author: "Isma-eel Jattiem"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+# Load Library
+library(ncdf4)
+library(lubridate)
+library(dplyr)
+library(progressr)
+library(foreach)
+library(doParallel)
+library(ggplot2)
+library(viridis)       
+library(sf)            
+library(rnaturalearth) 
+library(rnaturalearthdata)
+library(rmarkdown)
+library(fst)
+
+sf_use_s2(FALSE)
+
+```
+
+# Preprocessing
+
+Similar to the current data, precprocessing of the NetCDF file is required to extract and prep the data in order to make it useable.
+
+## Loading in Data
+```{r}
+# Load in Data
+npp <- nc_open("npp_Bob.nc")
+
+```
+
+
+## Processing NetCDF file
+
+### Extracting data from NetCDF
+```{r}
+# Extract Dimensions
+dim_lon <- ncvar_get(npp, "longitude")
+dim_lat <- ncvar_get(npp, "latitude")
+dim_time <- ncvar_get(npp, "time")
+
+```
+
+
+```{r}
+# Extract Variables 
+npp_var <- ncvar_get(npp, "npp", collapse_degen=FALSE)
+
+```
+
+
+### Converting time to SI units
+```{r}
+#| warning: false
+#| message: false
+
+# Time Conversion
+t_units <- ncatt_get(npp, "time", "units")
+t_ustr <- strsplit(t_units$value, " ")
+t_dstr <- strsplit(unlist(t_ustr)[3], "-")
+date <- ymd(t_dstr) + dseconds(dim_time)
+
+```
+
+### Calculating Grid
+```{r}
+# Create Dimensions grid
+coords <- as.matrix(expand.grid(dim_lon, dim_lat, date))
+
+```
+
+
+### Creating Data Frame
+```{r}
+# Combine Variables and Dimensions into a single Data Frame
+npp_df <- data.frame(cbind(coords, npp_var))
+
+# Renaming columns to stardadized format
+names(npp_df) <- c("lon", "lat", "time", "npp")
+
+```
+
+# Analysis
+
+## Exploring the data
+
+```{r}
+# Confirming time period
+npp_df_1 <- npp_df %>%
+  select(time) %>% 
+  unique()
+
+```
+
+## Making Map
+
+This will focus on exploring working with the data to make maps and eventually making the animations.
+
+### Setting up the data
+Due to the size of the data, when exploring the data, a subset will be used.\ 
+
+This Subset will focus on the first day being 2023-01-26. Unlike with the current data. Extracting the data like this means that certain variables would need to be converted to the proper format inorder to make them usable. ie. here npp, longitude and latitude would have to be converted into numeric variables in order to make them useable in ggplot.
+
+```{r}
+npp_26 <- npp_df %>% 
+  filter(time == "2023-01-26") %>% 
+  mutate(npp = as.numeric(npp),
+         lon = (as.numeric(lon)),
+         lat = (as.numeric(lat))) %>% 
+  na.omit()
+
+summary(npp_26)
+```
+
+### Map Parameters
+
+#### Setting Bounding Box
+```{r}
+min_lon <- min(npp_26$lon, na.rm = TRUE)
+max_lon <- max(npp_26$lon, na.rm = TRUE)
+min_lat <- min(npp_26$lat, na.rm = TRUE)
+max_lat <- max(npp_26$lat, na.rm = TRUE)
+
+xlim <-  c(min_lon, max_lon)
+ylim <-  c(min_lat, max_lat)
+```
+
+#### Creating the mask file of Land
+```{r}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+ggplot()+
+  geom_sf(data = world, fill = "grey80", color = "black", linewidth = 0.5) +
+  coord_sf(xlim = xlim, ylim = ylim)
+
+```
+
+#### Creating Bins inorder to plot the NPP
+
+These bins are temporary and are simply there for the purpose of exploring the data and will be changed when doing a more in depth look
+
+```{r}
+npp_26$bins <- cut(npp_26$npp, breaks=c(0,2000,2001,6000,6001,12000,12001,16000), 
+                   labels=c("very_low","low","low_mid","mid","high_mid", "high", "very_high"))
+```
+
+
+### Plotting the Map
+
+Here the Map of the npp on the 2023-01-26 is plot.\ 
+ 
+*Note*\ 
+ 
+The function geom_tile() is used in place of geom_raster() as the geom_raster resulted in errors as well as the map flipping constantly. 
+
+
+```{r}
+ggplot() +
+  geom_tile(data = npp_26, aes(x =lon, y =lat, fill = bins)) + 
+  geom_sf(data = world, fill = "grey80", color = "black", linewidth = 0.5) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "white"), 
+        plot.background = element_rect("white")) +
+  labs(title = "Net Primary Production For Bobb (2023-01-26)", 
+       x = "Longitude",
+       y = "Latitude",
+       colour = "NPP (g C m-2)")
+```
+
