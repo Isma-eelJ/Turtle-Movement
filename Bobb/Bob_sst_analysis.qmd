@@ -1,0 +1,166 @@
+---
+title: "Bob_sst_analysis"
+author: "Isma-eel Jattiem"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| message: false
+#| warning: false
+
+library(ncdf4)
+library(RNetCDF) # when expecting data
+library(lubridate)
+library(doParallel)
+library(progressr)
+library(tidyverse)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(viridis)
+
+sf_use_s2(FALSE)
+
+# handlers(global = TRUE)
+```
+
+# Preprocessing 
+
+## Load in Data
+
+```{r}
+# Load in Data
+sst <- nc_open("temp_Bob.nc")
+```
+
+## Processing
+
+### Viewing Data
+```{r eval=FALSE}
+# From RNetCDF
+sst_1 <- open.nc("temp_Bob.nc")
+
+# inspect data
+file.inq.nc(sst_1)
+
+# View
+print.nc(sst_1)
+
+# No depth
+# Moving back to wotking with ssh
+
+```
+
+### Extracting Dimensions and Varaibles 
+
+```{r}
+# Extract Dimensions
+dim_lon <- ncvar_get(sst, "longitude")
+dim_lat <- ncvar_get(sst, "latitude")
+dim_time <- ncvar_get(sst, "time")
+
+# Extract Variables 
+sst_var <- ncvar_get(sst, "analysed_sst", collapse_degen=FALSE)
+```
+
+### Converting time to SI units
+
+```{r}
+# Time Conversion
+t_units <- ncatt_get(sst, "time", "units")
+t_ustr <- strsplit(t_units$value, " ")
+t_dstr <- strsplit(unlist(t_ustr)[3], "-")
+date <- ymd(t_dstr) + dseconds(dim_time)
+```
+
+### Creating Grid
+
+```{r}
+# Create Dimensions grid
+coords <- as.matrix(expand.grid(dim_lon, dim_lat, date))
+```
+
+### Creating Data Frame
+```{r}
+# Combine Variables and Dimensions into a single Data Frame
+sst_df <- data.frame(cbind(coords, sst_var))
+
+# Renaming columns to stardadized format
+names(sst_df) <- c("lon", "lat", "time", "temp")
+```
+
+# Analysis
+
+## Map Parameters
+
+```{r}
+summary(sst_df)
+
+sst_data <- sst_df %>% 
+  mutate(temp = as.numeric(temp),
+         lon = (as.numeric(lon)),
+         lat = (as.numeric(lat))) %>% 
+  na.omit()
+summary(sst_data)
+
+
+# after initial viewing there is a lot of NA values so they were removed
+```
+
+### Subsetting Data
+
+```{r}
+sst_26 <- sst_data %>%
+  filter(time == "2023-01-26")
+```
+
+### Creating Bounding Box
+
+```{r}
+
+# Setting Bounding Box
+min_lon <- min(sst_26$lon, na.rm = TRUE)
+max_lon <- max(sst_26$lon, na.rm = TRUE)
+min_lat <- min(sst_26$lat, na.rm = TRUE)
+max_lat <- max(sst_26$lat, na.rm = TRUE)
+
+xlim <-  c(min_lon, max_lon)
+ylim <-  c(min_lat, max_lat)
+```
+
+### Creating Bins
+
+```{r}
+sst_26$bins <- cut(sst_26$temp, breaks=c(0, 285, 290, 292, 295, 298, 302, 305), 
+                   labels=c("very_low","low","low_mid","mid","high_mid", "high", "very_high"))
+```
+
+### Creating Land Mask
+
+```{r}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+## Creating Map
+
+```{r}
+ggplot() +
+  geom_tile(data = sst_26, aes(x =lon, y =lat, fill = bins)) + 
+  geom_sf(data = world, fill = "grey80", color = "black", linewidth = 0.5) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "white"), 
+        plot.background = element_rect("white")) +
+  labs(title = "Sea Surface Temperature (SST) For Bobb (2023-01-26)",  # Modify the title as needed
+       x = "Longitude",
+       y = "Latitude",
+       colour = "SSH (???)")
+
+
+```
+
