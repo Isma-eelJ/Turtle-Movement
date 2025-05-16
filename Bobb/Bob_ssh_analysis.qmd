@@ -1,0 +1,176 @@
+---
+title: "Bob_ssh_analysis"
+author: "Isma-eel Jattiem"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| message: false
+#| warning: false
+
+library(ncdf4)
+library(RNetCDF) # when expecting data
+library(lubridate)
+library(doParallel)
+library(progressr)
+library(tidyverse)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(viridis)
+
+sf_use_s2(FALSE)
+
+# handlers(global = TRUE)
+```
+
+# Preprocessing
+
+## Loading in Data
+```{r}
+# Load in Data
+ssh <- nc_open("sea_surface_height_Bob.nc")
+```
+
+## Processing NetCDF file
+
+### Viewing Data
+
+Using RNetCDF
+
+```{r}
+# From RNetCDF
+ssh_1 <- open.nc("sea_surface_height_Bob.nc")
+
+# inspect data
+# file.inq.nc(ssh_1)
+
+# View
+print.nc(ssh_1)
+
+# No depth
+# Moving back to wotking with ssh
+```
+
+### Extracting Dimensions and Variables
+
+```{r}
+# Extract Dimensions
+dim_lon <- ncvar_get(ssh, "longitude")
+dim_lat <- ncvar_get(ssh, "latitude")
+dim_time <- ncvar_get(ssh, "time")
+
+# Extract Variables 
+ssh_var <- ncvar_get(ssh, "zos", collapse_degen=FALSE)
+```
+
+### Converting time to SI units
+
+```{r}
+# Time Conversion
+t_units <- ncatt_get(ssh, "time", "units")
+t_ustr <- strsplit(t_units$value, " ")
+t_dstr <- strsplit(unlist(t_ustr)[3], "-")
+date <- ymd(t_dstr) + dseconds(dim_time)
+
+```
+
+### Calculating Grid
+```{r}
+# Create Dimensions grid
+coords <- as.matrix(expand.grid(dim_lon, dim_lat, date))
+
+```
+
+
+### Creating Data Frame
+```{r}
+# Combine Variables and Dimensions into a single Data Frame
+ssh_df <- data.frame(cbind(coords, ssh_var))
+
+# Renaming columns to stardadized format
+names(ssh_df) <- c("lon", "lat", "time", "ssh")
+
+```
+
+#### Verifying Data Frame
+
+```{r}
+# Confirming time period
+ssh_df_1 <- ssh_df %>%
+  select(time) %>% 
+  unique()
+head(ssh_df_1)
+```
+
+# Analysis
+
+```{r}
+ssh_data <- ssh_df %>% 
+  mutate(ssh = as.numeric(ssh),
+         lon = (as.numeric(lon)),
+         lat = (as.numeric(lat))) %>% 
+  na.omit()
+summary(ssh_data)
+
+# after initial viewing there is a lot of NA values so they were removed
+```
+
+## Creating a map
+
+### Subsetting Data
+```{r}
+ssh_26 <- ssh_data %>% 
+  filter(time == min(time))
+```
+
+### Creating Bounding Box
+
+```{r}
+# Setting Bounding Box
+min_lon <- min(ssh_26$lon, na.rm = TRUE)
+max_lon <- max(ssh_26$lon, na.rm = TRUE)
+min_lat <- min(ssh_26$lat, na.rm = TRUE)
+max_lat <- max(ssh_26$lat, na.rm = TRUE)
+
+xlim <-  c(min_lon, max_lon)
+ylim <-  c(min_lat, max_lat)
+```
+
+### Creating Bins
+
+```{r}
+ssh_26$bins <- cut(ssh_26$ssh, breaks=c(-0.9, -0.3, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8), 
+                   labels=c("very_low","low","low_mid","mid","high_mid", "high", "very_high"))
+```
+
+### Land Mask
+
+```{r}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+## Creating Map
+
+```{r}
+ggplot() +
+  geom_tile(data = ssh_26, aes(x =lon, y =lat, fill = bins)) + 
+  geom_sf(data = world, fill = "grey80", color = "black", linewidth = 0.5) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "white"), 
+        plot.background = element_rect("white")) +
+  labs(title = "Sea Surface Height (SSH) For Bobb (2023-01-26)",  # Modify the title as needed
+       x = "Longitude",
+       y = "Latitude",
+       colour = "SSH (m)")
+
+
+```
+
+
