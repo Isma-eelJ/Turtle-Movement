@@ -7,11 +7,12 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(rnaturalearthhires)
 library(sf)
-library(viridis)
+library(ggspatial)
 
 sf_use_s2(FALSE)
 
-# Define spatial bounds
+
+# Define Spatial Bounds ---------------------------------------------------
 # Will vary for each turtle based on the region they are released and travel 
 min_lon <- 15
 max_lon <- 32
@@ -21,8 +22,13 @@ max_lat <- -28
 xlim <- c(min_lon, max_lon)
 ylim <- c(min_lat, max_lat)
 
-# Load world map
+
+# Load World Map ----------------------------------------------------------
+
 world <- ne_countries(scale = "large", returnclass = "sf")
+
+
+# Palettes ----------------------------------------------------------------
 
 
 # Buffer ------------------------------------------------------------------
@@ -33,41 +39,49 @@ africa <- ne_countries(returnclass = 'sf',
                        scale = "large")
 
 
-# Setting a 1km buffer around the continent
-buffer <- africa %>%
-  st_buffer(0.01)
+# Setting a 5km buffer around the continent
+africa_buffer <- africa %>%
+  st_buffer(0.05)
 
 
 # Map ---------------------------------------------------------------------
 
 ggplot() +
 # geom_raster() + of desired variable 
-  geom_sf(data = buffer, fill = "red", 
-          col = "transparent") + # will change to lightblue, simply for visible
-  geom_sf(data = world, fill = "lightgrey", col = "black", linewidth = 0.3) +
+  geom_sf(data = africa_buffer, fill = "lightblue", 
+          col = "transparent") + # will change to #E6F3FF, simply for visible
+  geom_sf(data = world, fill = "grey85", col = "grey30", linewidth = 0.3) +
   coord_sf(ylim = ylim, xlim = xlim, expand = FALSE) +
-  # scale_fill_manual(
-  #   name = "variable\n(units)",
-  #   values = palette,
-  #   na.value = "transparent",
-  #   drop = FALSE
-  # ) + # Will vary for each variable
-  scale_alpha(range = c(0.01, 2.3), guide = "none") +
-  theme_bw() +
+  scale_x_continuous(labels = function(x) format(abs(x), digits = 3)) +
+  scale_y_continuous(labels = function(x) format(abs(x), digits = 3)) +
+  annotation_scale(location = "br", width_hint = 0.2, 
+                   text_cex = 0.8, bar_cols = c("black", "white")) +
+  annotation_north_arrow(location = "tl", which_north = "true", 
+                         pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
+                         style = north_arrow_fancy_orienteering,
+                         height = unit(1.2, "cm"), width = unit(1.2, "cm")) +
+  theme_minimal() +
   theme(
-    legend.position = "right",
-    legend.key.height = unit(1.4, "cm"), 
-    legend.background = element_blank(),
+    # Panel styling
     panel.grid = element_blank(),
-    panel.background = element_rect("lightblue"),
-    axis.title.x = element_text(vjust = -1, size = 11),
-    axis.title.y = element_text(vjust = 2, size = 12),
-    axis.text.x = element_text(size = 9),
-    axis.text.y = element_text(size = 9)) +
+    panel.background = element_rect(fill = "#E6F3FF", color = NA),
+    panel.border = element_rect(color = "grey20", fill = NA, size = 1),
+    
+    # Title styling (positioned top-right like NPP script)
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.98, vjust = -0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.98, vjust = -1.2, color = "grey20"),
+    
+    # Axis styling
+    axis.title = element_text(size = 11, color = "grey20"),
+    axis.text = element_text(size = 9, color = "grey40"),
+    axis.ticks = element_line(color = "grey40"),
+    
+    # Margins
+    plot.margin = margin(20, 20, 20, 20)) + 
   labs(
-    x = "Longitude", 
-    y = "Latitude",
-    title = "Turtle's Name - Variable being viewed",
-    subtitle = "Date")
+  title = "Turtle's Name - Variable being viewed",
+  subtitle = "Date",
+  x = "Longitude (°E)",
+  y = "Latitude (°S)")
 
 
