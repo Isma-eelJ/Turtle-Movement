@@ -22,7 +22,7 @@ sf_use_s2(FALSE)
 
 # Data loading and preprocessing ------------------------------------------
 
-df <- read.csv("C:/Users/ijatt/Documents/Masters/Turtles/Stamm/TRACK DATA/CADDY/233362-Argos.csv")
+df <- read.csv("C:/Users/ijatt/Documents/Masters/Turtles/Turtles/TRACK DATA/CADDY/233362-Argos.csv")
 
 # Convert the 'Date' column to POSIXct format
 df$Date <- as.POSIXct(strptime(df$Date, format = "%H:%M:%S %d-%b-%Y"))
@@ -35,10 +35,225 @@ str(df)
 head(df)
 tail(df)
 
-# Date filtering
-start_date <- as.Date("2022-07-07")
+
+# Create raw data daily maps (before date filtering) ---------------------
+
+# Filter out NA values for coordinates
+df_raw_clean <- df %>% filter(!is.na(Longitude), !is.na(Latitude))
+
+cat("Raw data points after removing NA coordinates:", nrow(df_raw_clean), "\n")
+
+# Create output directory for raw maps
+raw_output_dir <- "Caddy/Figures/Caddy_raw_daily_maps"
+if (!dir.exists(raw_output_dir)) {
+  dir.create(raw_output_dir, recursive = TRUE)
+}
+
+# Load geographic data for raw maps
+world <- ne_countries(scale = "large", returnclass = "sf")
+africa <- ne_countries(returnclass = 'sf', continent = "Africa", scale = "large")
+africa_buffer <- africa %>% st_buffer(0.05)
+
+# Define spatial bounds for raw maps
+min_lon <- 25
+max_lon <- 29
+min_lat <- -35
+max_lat <- -32
+xlim <- c(min_lon, max_lon)
+ylim <- c(min_lat, max_lat)
+
+# Prepare daily data structure for raw data
+df_raw_clean$date_only <- as.Date(df_raw_clean$Date)
+unique_raw_dates <- sort(unique(df_raw_clean$date_only))
+
+cat("Unique raw tracking dates:", length(unique_raw_dates), "\n")
+cat("Raw date range:", as.character(min(unique_raw_dates)), "to", as.character(max(unique_raw_dates)), "\n\n")
+
+# Enhanced mapping function for raw data with daily sequence indicators
+create_raw_turtle_map <- function(current_date, raw_data, world, africa_buffer, xlim, ylim) {
+  
+  # Get cumulative track up to current date
+  cumulative_track <- raw_data[raw_data$date_only <= current_date, ]
+  
+  # Get current day's points and add sequence numbers
+  current_points <- raw_data[raw_data$date_only == current_date, ]
+  
+  # Create base map
+  p <- ggplot() +
+    # Ocean background
+    geom_sf(data = africa_buffer, fill = "#E6F3FF", col = "transparent") +
+    # Coastlines
+    geom_sf(data = world, fill = "grey85", col = "grey30", linewidth = 0.3) +
+    coord_sf(ylim = ylim, xlim = xlim, expand = FALSE) +
+    scale_x_continuous(labels = function(x) format(abs(x), digits = 3)) +
+    scale_y_continuous(labels = function(x) format(abs(x), digits = 3))
+  
+  # Add cumulative tracking path
+  if (nrow(cumulative_track) > 1) {
+    # Path line
+    p <- p + geom_path(data = cumulative_track, 
+                       aes(x = Longitude, y = Latitude), 
+                       color = "#FF0000", 
+                       size = 1.8, 
+                       alpha = 0.8,
+                       linetype = "solid")
+    
+    # Previous points (smaller, semi-transparent)
+    previous_points <- cumulative_track[cumulative_track$date_only < current_date, ]
+    if (nrow(previous_points) > 0) {
+      p <- p + geom_point(data = previous_points, 
+                          aes(x = Longitude, y = Latitude), 
+                          color = "#8B0000", 
+                          size = 2.5, 
+                          alpha = 0.6,
+                          shape = 16)
+    }
+  }
+  
+  # Add current day's points with sequence indicators
+  if (nrow(current_points) > 0) {
+    # Order current points by time within the day
+    current_points_ordered <- current_points[order(current_points$Date), ]
+    current_points_ordered$daily_sequence <- 1:nrow(current_points_ordered)
+    
+    # Create a color palette for daily sequences (rainbow effect)
+    if (nrow(current_points_ordered) > 1) {
+      colors_palette <- rainbow(nrow(current_points_ordered), start = 0, end = 0.8)
+    } else {
+      colors_palette <- "#FF0000"
+    }
+    
+    # Add points for each observation in sequence
+    for (i in 1:nrow(current_points_ordered)) {
+      point_data <- current_points_ordered[i, ]
+      sequence_num <- point_data$daily_sequence
+      point_color <- colors_palette[i]
+      
+      # Size gets progressively larger through the day
+      point_size <- 4 + (i * 1.5)
+      glow_size <- point_size + 3
+      
+      # Add glow effect
+      p <- p + geom_point(data = point_data, 
+                          aes(x = Longitude, y = Latitude), 
+                          color = point_color, 
+                          size = glow_size, 
+                          alpha = 0.3,
+                          shape = 16)
+      
+      # Add main point
+      p <- p + geom_point(data = point_data, 
+                          aes(x = Longitude, y = Latitude), 
+                          color = point_color, 
+                          size = point_size, 
+                          alpha = 1.0,
+                          shape = 16)
+      
+      # Add white center
+      p <- p + geom_point(data = point_data, 
+                          aes(x = Longitude, y = Latitude), 
+                          color = "white", 
+                          size = point_size * 0.4, 
+                          alpha = 1.0,
+                          shape = 16)
+      
+      # Add sequence number as text
+      p <- p + geom_text(data = point_data, 
+                         aes(x = Longitude, y = Latitude), 
+                         label = sequence_num,
+                         size = 3.5,
+                         color = "black",
+                         fontface = "bold")
+    }
+    
+    # Add connecting lines between current day's points if more than one
+    if (nrow(current_points_ordered) > 1) {
+      p <- p + geom_path(data = current_points_ordered, 
+                         aes(x = Longitude, y = Latitude), 
+                         color = "blue", 
+                         size = 2, 
+                         alpha = 0.7,
+                         linetype = "dashed")
+    }
+  }
+  
+  # Simple theme without annotations
+  p <- p + theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      panel.background = element_rect(fill = "#E6F3FF", color = NA),
+      panel.border = element_rect(color = "grey20", fill = NA, size = 1),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "grey30"),
+      axis.title = element_text(size = 11, color = "grey20"),
+      axis.text = element_text(size = 9, color = "grey40"),
+      axis.ticks = element_line(color = "grey40"),
+      plot.margin = margin(20, 20, 20, 20)
+    )
+  
+  # Add title and subtitle with daily observation count
+  daily_obs_count <- nrow(current_points)
+  subtitle_text <- if (daily_obs_count > 1) {
+    paste("Daily observations:", daily_obs_count, "| Colors show sequence within day")
+  } else if (daily_obs_count == 1) {
+    "Daily observations: 1"
+  } else {
+    "No observations this day"
+  }
+  
+  p <- p + labs(
+    title = paste("Caddy Raw Data -", format(current_date, "%d %B %Y")),
+    subtitle = subtitle_text,
+    x = "Longitude (°E)",
+    y = "Latitude (°S)"
+  )
+  
+  return(p)
+}
+
+# Create all daily raw maps
+cat("Creating raw data daily turtle tracking maps...\n")
+cat("Raw output directory:", raw_output_dir, "\n\n")
+
+# Progress tracking for raw maps
+total_raw_days <- length(unique_raw_dates)
+raw_start_time <- Sys.time()
+
+for (i in 1:total_raw_days) {
+  current_date <- unique_raw_dates[i]
+  cat("Processing raw day", i, "of", total_raw_days, ":", format(current_date, "%Y-%m-%d"), "\n")
+  
+  # Create raw map
+  daily_raw_map <- create_raw_turtle_map(current_date, df_raw_clean, world, africa_buffer, 
+                                         xlim, ylim)
+  
+  # Save with high quality
+  filename <- file.path(raw_output_dir, paste0("Caddy_raw_map_", format(current_date, "%Y%m%d"), ".png"))
+  ggsave(filename, daily_raw_map, width = 14, height = 10, dpi = 300, 
+         bg = "white", type = "cairo-png")
+  
+  # Progress updates
+  if (i %% 5 == 0 || i == total_raw_days) {
+    elapsed <- difftime(Sys.time(), raw_start_time, units = "mins")
+    est_total <- elapsed * total_raw_days / i
+    remaining <- est_total - elapsed
+    cat("Raw maps progress:", round(100 * i / total_raw_days, 1), "% |", 
+        "Elapsed:", round(elapsed, 1), "min |",
+        "Remaining:", round(remaining, 1), "min\n")
+  }
+}
+
+cat("Raw data daily maps completed!\n\n")
+
+# Persistent Movement Model  ----------------------------------------------
+
+# Date and time filtering
+start_date <- as.Date("2022-07-11")
 end_date <- as.Date("2022-07-28")
-df_3 <- df[df$Date >= start_date & df$Date <= end_date, ]
+
+df_3 <- df %>%
+  dplyr::filter(as.Date(Date) >= start_date & as.Date(Date) <= end_date) %>%
+  dplyr::filter(!(as.Date(Date) == start_date & format(Date, "%H:%M:%S") < "09:30:00"))
 
 cat("Filtered data range:", as.character(start_date), "to", as.character(end_date), "\n")
 cat("Filtered data points:", nrow(df_3), "\n")
